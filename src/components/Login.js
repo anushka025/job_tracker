@@ -61,7 +61,7 @@ function Login() {
 
   // 🆕 NEW: Google Sign-In function
   const handleGoogleSignIn = async () => {
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo: window.location.origin + '/dashboard'

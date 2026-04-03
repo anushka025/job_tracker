@@ -204,9 +204,9 @@ function Landing() {
               <p className="text-sm mt-1">The smart way to track your job search</p>
             </div>
             <div className="flex gap-6">
-              <a href="#" className="hover:text-white transition">Privacy</a>
-              <a href="#" className="hover:text-white transition">Terms</a>
-              <a href="#" className="hover:text-white transition">Contact</a>
+              <a href="#privacy" className="hover:text-white transition">Privacy</a>
+              <a href="#terms" className="hover:text-white transition">Terms</a>
+              <a href="#contact" className="hover:text-white transition">Contact</a>
             </div>
           </div>
           <div className="border-t border-gray-800 mt-8 pt-8 text-center text-sm">

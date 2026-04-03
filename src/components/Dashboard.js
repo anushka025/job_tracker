@@ -38,24 +38,24 @@ function Dashboard() {
     notes: ''
   });
 
-  useEffect(() => {
-    getUser();
-  }, []);
-
-  useEffect(() => {
-    if (user) {
-      fetchApplications();
-    }
-  }, [user]);
-
-  const getUser = async () => {
+  const getUser = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       setUser(user);
     } else {
       navigate('/login');
     }
-  };
+  }, [navigate]);
+
+  useEffect(() => {
+    getUser();
+  }, [getUser]);
+
+  useEffect(() => {
+    if (user) {
+      fetchApplications();
+    }
+  }, [user, fetchApplications]);
 
   const fetchApplications = useCallback(async () => {
     setLoading(true);
