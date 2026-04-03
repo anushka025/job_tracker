@@ -47,6 +47,24 @@ function Dashboard() {
     }
   }, [navigate]);
 
+  const fetchApplications = useCallback(async () => {
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from('applications')
+      .select('*')
+      .eq('user_id', user?.id)
+      .order('date_applied', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching applications:', error);
+    } else {
+      setApplications(data || []);
+    }
+
+    setLoading(false);
+  }, [user?.id]);
+
   useEffect(() => {
     getUser();
   }, [getUser]);
@@ -56,24 +74,6 @@ function Dashboard() {
       fetchApplications();
     }
   }, [user, fetchApplications]);
-
-  const fetchApplications = useCallback(async () => {
-    setLoading(true);
-    
-    const { data, error } = await supabase
-      .from('applications')
-      .select('*')
-      .eq('user_id', user?.id)
-      .order('date_applied', { ascending: false });
-  
-    if (error) {
-      console.error('Error fetching applications:', error);
-    } else {
-      setApplications(data || []);
-    }
-    
-    setLoading(false);
-  }, [user?.id]);
 
   // Save auth token for extension
   useEffect(() => {
