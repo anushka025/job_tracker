@@ -38,23 +38,255 @@ function extractLinkedInJobIdFromUrl(url) {
   return null;
 }
 
+function extractLinkedInJobIdFromElementSelf(el) {
+  if (!el || el.nodeType !== Node.ELEMENT_NODE) return null;
+  const occludable = el.getAttribute?.('data-occludable-job-id') || el.getAttribute?.('data-job-id');
+  if (occludable && /^\d+$/.test(String(occludable).trim())) {
+    return String(occludable).trim();
+  }
+  const urn = el.getAttribute?.('data-entity-urn') || '';
+  const urnMatch = urn.match(/jobPosting:(\d+)/);
+  if (urnMatch) return urnMatch[1];
+  return null;
+}
+
+function extractJobIdFromDismissAncestorChain(dismissButton) {
+  if (!dismissButton) return null;
+  let el = dismissButton;
+  for (let i = 0; i < 35 && el; i++) {
+    const id = extractLinkedInJobIdFromElementSelf(el);
+    if (id) return id;
+    el = el.parentElement;
+  }
+  return null;
+}
+
 function extractLinkedInJobIdFromCard(jobCard) {
   if (!jobCard) return null;
+
+  const idSelf = extractLinkedInJobIdFromElementSelf(jobCard);
+  if (idSelf) return idSelf;
+
+  for (const el of jobCard.querySelectorAll('[data-occludable-job-id], [data-job-id]')) {
+    const id = extractLinkedInJobIdFromElementSelf(el);
+    if (id) return id;
+  }
+
+  for (const el of jobCard.querySelectorAll('[data-entity-urn*="jobPosting"]')) {
+    const id = extractLinkedInJobIdFromElementSelf(el);
+    if (id) return id;
+  }
 
   const viewLink = jobCard.querySelector('a[href*="/jobs/view/"]');
   const fromViewHref = extractLinkedInJobIdFromUrl(viewLink?.href);
   if (fromViewHref) return fromViewHref;
 
-  const currentLink = jobCard.querySelector('a[href*="currentJobId="]');
-  const fromCurrentHref = extractLinkedInJobIdFromUrl(currentLink?.href);
-  if (fromCurrentHref) return fromCurrentHref;
-
-  const urnEl = jobCard.querySelector('[data-entity-urn*="jobPosting"]') || jobCard.closest('[data-entity-urn*="jobPosting"]');
-  const urn = urnEl?.getAttribute?.('data-entity-urn') || '';
-  const urnMatch = urn.match(/jobPosting:(\d+)/);
-  if (urnMatch) return urnMatch[1];
+  const pageUrlJobId = extractLinkedInJobIdFromUrl(window.location.href);
+  for (const link of jobCard.querySelectorAll('a[href*="currentJobId="]')) {
+    const id = extractLinkedInJobIdFromUrl(link.href);
+    if (!id) continue;
+    if (pageUrlJobId && id === pageUrlJobId) continue;
+    return id;
+  }
+  for (const link of jobCard.querySelectorAll('a[href*="currentJobId="]')) {
+    const id = extractLinkedInJobIdFromUrl(link.href);
+    if (id) return id;
+  }
 
   return null;
+}
+
+function normalizeText(value) {
+  return (value || '').replace(/\s+/g, ' ').trim();
+}
+
+function findLikelyJobCard(dismissButton) {
+  if (!dismissButton) return null;
+
+  const closestCard = dismissButton.closest(
+    [
+      'li[data-occludable-job-id]',
+      'li[data-job-id]',
+      'div[data-occludable-job-id]',
+      'div[data-job-id]',
+      'li[data-entity-urn*="jobPosting"]',
+      'div[data-entity-urn*="jobPosting"]',
+      'article[data-entity-urn*="jobPosting"]',
+      'li[class*="job-card-container"]',
+      'div[class*="job-card-container"]'
+    ].join(',')
+  );
+  if (closestCard) return closestCard;
+
+  let candidate = dismissButton.parentElement;
+  for (let i = 0; i < 28 && candidate; i++) {
+    const dismissCount =
+      candidate.querySelectorAll?.('button[aria-label^="Dismiss"][aria-label$="job"]')?.length ?? 0;
+    const textLen = (candidate.innerText || '').replace(/\s+/g, ' ').trim().length;
+    if (dismissCount === 1 && textLen > 20 && textLen < 4000) {
+      const jid = extractLinkedInJobIdFromCard(candidate);
+      if (jid) {
+        console.log(`JobTracker Pro: Found job card (single-dismiss + job id) at level ${i}`);
+        return candidate;
+      }
+    }
+    candidate = candidate.parentElement;
+  }
+
+  candidate = dismissButton.parentElement;
+  for (let i = 0; i < 28 && candidate; i++) {
+    const dismissCount =
+      candidate.querySelectorAll?.('button[aria-label^="Dismiss"][aria-label$="job"]')?.length ?? 0;
+    const textLen = (candidate.innerText || '').replace(/\s+/g, ' ').trim().length;
+    if (dismissCount === 1 && textLen > 20 && textLen < 4000) {
+      console.log(`JobTracker Pro: Found job card (single-dismiss heuristic) at level ${i}`);
+      return candidate;
+    }
+    candidate = candidate.parentElement;
+  }
+
+  candidate = dismissButton.parentElement;
+  for (let i = 0; i < 20 && candidate; i++) {
+    const candidateJobId = extractLinkedInJobIdFromCard(candidate);
+    if (candidateJobId) {
+      console.log(`JobTracker Pro: Found job card by traversal at level ${i}`);
+      return candidate;
+    }
+    candidate = candidate.parentElement;
+  }
+
+  return null;
+}
+
+function getFirstTextBySelectors(container, selectors) {
+  for (const selector of selectors) {
+    const element = container.querySelector(selector);
+    const text = normalizeText(element?.textContent);
+    if (text) return text;
+  }
+  return null;
+}
+
+function getAllTextsBySelectors(container, selectors) {
+  const values = [];
+  for (const selector of selectors) {
+    const elements = container.querySelectorAll(selector);
+    elements.forEach((element) => {
+      const text = normalizeText(element?.textContent);
+      if (text) values.push(text);
+    });
+  }
+  return [...new Set(values)];
+}
+
+function looksLikeLocationLine(text) {
+  if (!text) return false;
+  return (
+    /,\s*[A-Z]{2}\b/.test(text) ||
+    /\b(remote|hybrid|on-?site)\b/i.test(text) ||
+    /\b(USA|United States|Canada|UK|India|Australia)\b/i.test(text)
+  );
+}
+
+const LOCATION_JUNK_RE =
+  /ago|applicant|promoted|easy apply|alumni|actively reviewing|\$|\d+k\/|\/yr|\/mo|\/hr|salary|compensation/i;
+
+function segmentLooksLikeLocation(text) {
+  if (!text || text.length >= 120) return false;
+  if (LOCATION_JUNK_RE.test(text)) return false;
+  return looksLikeLocationLine(text);
+}
+
+/** First line/· segment that looks like a place; handles merged location + salary/benefits in one node. */
+function getBestLocationFromBlob(raw) {
+  const n = normalizeText(raw);
+  if (!n) return null;
+
+  const lines = n.split(/\n/).map((line) => normalizeText(line)).filter(Boolean);
+  for (const line of lines) {
+    if (line.length >= 120) continue;
+    const parts = line.split(/\s*·\s*/).map((p) => normalizeText(p)).filter(Boolean);
+    for (const part of parts) {
+      if (segmentLooksLikeLocation(part)) return part;
+    }
+  }
+  return null;
+}
+
+function extractCompanyName(jobCard, fallbackTitle) {
+  const fromSelectors = getFirstTextBySelectors(jobCard, [
+    '.job-card-container__company-name',
+    '.artdeco-entity-lockup__subtitle',
+    'a[href*="/company/"]',
+    '[data-tracking-control-name*="company"]'
+  ]);
+  if (fromSelectors) return fromSelectors;
+
+  const titleHint = normalizeText(fallbackTitle || '').toLowerCase();
+  const paras = [...jobCard.querySelectorAll('p')]
+    .map((p) => normalizeText(p.textContent))
+    .filter((t) => t.length > 1 && t.length < 120);
+
+  const junk = /(verified job|save to jobtracker|^\s*about\s*$|linkedin)/i;
+  const good = paras.filter((t) => !junk.test(t));
+
+  for (const t of good) {
+    if (titleHint && t.toLowerCase().includes(titleHint.slice(0, Math.min(24, titleHint.length)))) {
+      continue;
+    }
+    if (looksLikeLocationLine(t)) continue;
+    if (t.length >= 2 && t.length < 80) return t;
+  }
+
+  return 'Unknown Company';
+}
+
+function extractLocation(jobCard) {
+  const locationCandidates = getAllTextsBySelectors(jobCard, [
+    '.job-card-container__metadata-item',
+    '.artdeco-entity-lockup__caption',
+    'li[class*="metadata"]',
+    'span[class*="metadata"]',
+    '[class*="job-card-container__metadata-wrapper"] span'
+  ]);
+
+  for (const text of locationCandidates) {
+    const fromBlob = getBestLocationFromBlob(text);
+    if (fromBlob) return fromBlob;
+  }
+
+  const rankedCandidates = locationCandidates
+    .filter((text) => text.length < 120)
+    .filter((text) => !LOCATION_JUNK_RE.test(text))
+    .map((text) => ({
+      text,
+      score: /remote|hybrid|on-?site/i.test(text) ? 1 : 4
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  if (rankedCandidates.length > 0) {
+    return rankedCandidates[0].text;
+  }
+
+  for (const p of jobCard.querySelectorAll('p')) {
+    const t = normalizeText(p.textContent);
+    if (!t || t.length >= 120) continue;
+    if (/verified job|save to jobtracker/i.test(t)) continue;
+    const fromBlob = getBestLocationFromBlob(t);
+    if (fromBlob) return fromBlob;
+  }
+
+  const fromParagraph = [...jobCard.querySelectorAll('p')]
+    .map((p) => normalizeText(p.textContent))
+    .find(
+      (t) =>
+        t.length < 120 &&
+        looksLikeLocationLine(t) &&
+        !/verified job|save to jobtracker/i.test(t)
+    );
+  if (fromParagraph) return fromParagraph;
+
+  return 'Location not specified';
 }
 
 function isJobsPage() {
@@ -65,26 +297,28 @@ function isJobsPage() {
 function extractJobDataFromDismissButton(dismissButton) {
   try {
     const ariaLabel = dismissButton.getAttribute('aria-label') || '';
-    const jobTitle = ariaLabel.replace('Dismiss ', '').replace(' job', '').trim();
-    
-    let jobCard = dismissButton;
-    for (let i = 0; i < 10; i++) {
-      jobCard = jobCard.parentElement;
-      if (!jobCard) break;
-      const hasJobLink = jobCard.querySelector('a[href*="/jobs/view/"]');
-      if (hasJobLink) {
-        console.log(`JobTracker Pro: Found job card at level ${i}`);
-        break;
-      }
-    }
+    const fallbackTitle = ariaLabel.replace('Dismiss ', '').replace(' job', '').trim();
+    const jobCard = findLikelyJobCard(dismissButton);
     
     if (!jobCard) {
       console.error('JobTracker Pro: No job card found');
       return null;
     }
 
-    const jobLink = jobCard.querySelector('a[href*="/jobs/view/"]');
-    let jobId = extractLinkedInJobIdFromCard(jobCard);
+    const jobTitle = getFirstTextBySelectors(jobCard, [
+      'a[href*="/jobs/view/"] span[aria-hidden="true"]',
+      'a[href*="/jobs/view/"] strong',
+      'a[href*="/jobs/view/"]',
+      '[class*="job-card-list__title"]',
+      'h3',
+      'h4'
+    ]) || fallbackTitle;
+    const companyName = normalizeText(extractCompanyName(jobCard, fallbackTitle)) || 'Unknown Company';
+    const location = normalizeText(extractLocation(jobCard)) || 'Location not specified';
+    const platform = window.location.hostname.includes('linkedin') ? 'LinkedIn' : window.location.hostname;
+
+    let jobId =
+      extractJobIdFromDismissAncestorChain(dismissButton) || extractLinkedInJobIdFromCard(jobCard);
 
     if (!jobId) {
       const urlJobId = extractLinkedInJobIdFromUrl(window.location.href);
@@ -100,14 +334,14 @@ function extractJobDataFromDismissButton(dismissButton) {
     }
     
     const jobData = {
-      company_name: 'LinkedIn',
+      company_name: companyName,
       job_title: jobTitle,
-      location: 'Remote',
+      location,
       job_link: `https://www.linkedin.com/jobs/view/${jobId}`,
       date_applied: new Date().toISOString().split('T')[0],
       status: 'Saved',
-      platform: 'LinkedIn',
-      notes: `Saved from LinkedIn on ${new Date().toLocaleDateString()}`
+      platform,
+      notes: `Saved from ${platform} on ${new Date().toLocaleDateString()} (${companyName} • ${location})`
     };
     
     console.log('JobTracker Pro: Extracted job data:', jobData);

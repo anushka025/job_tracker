@@ -1,5 +1,5 @@
 /* global chrome */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 
@@ -14,7 +14,20 @@ function Dashboard() {
   const [successMessage, setSuccessMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const selectAllRef = useRef(null);
   const [formData, setFormData] = useState({
+    company_name: '',
+    job_title: '',
+    location: '',
+    date_applied: new Date().toISOString().split('T')[0],
+    status: 'Applied',
+    platform: 'LinkedIn',
+    job_link: '',
+    notes: ''
+  });
+
+  const emptyForm = () => ({
     company_name: '',
     job_title: '',
     location: '',
@@ -166,28 +179,39 @@ function Dashboard() {
     setSuccessMessage('✅ Application added successfully!');
     setTimeout(() => setSuccessMessage(''), 3000);
     
-    setFormData({
-      company_name: '',
-      job_title: '',
-      location: '',
-      date_applied: new Date().toISOString().split('T')[0],
-      status: 'Applied',
-      platform: 'LinkedIn',
-      job_link: '',
-      notes: ''
-    });
-    
+    setFormData(emptyForm());
+
     setShowAddModal(false);
     setLoading(false);
   };
 
+  const closeApplicationModals = () => {
+    setShowAddModal(false);
+    setShowEditModal(false);
+    setEditingApplication(null);
+    setFormData(emptyForm());
+  };
+
+  const openAddModal = () => {
+    setShowEditModal(false);
+    setEditingApplication(null);
+    setFormData(emptyForm());
+    setShowAddModal(true);
+  };
+
   const handleEditClick = (application) => {
+    setShowAddModal(false);
     setEditingApplication(application);
+    const rawDate = application.date_applied;
+    const dateForInput =
+      rawDate != null && String(rawDate).length >= 10
+        ? String(rawDate).slice(0, 10)
+        : new Date().toISOString().split('T')[0];
     setFormData({
       company_name: application.company_name,
       job_title: application.job_title,
       location: application.location || '',
-      date_applied: application.date_applied,
+      date_applied: dateForInput,
       status: application.status,
       platform: application.platform || 'LinkedIn',
       job_link: application.job_link || '',
@@ -198,6 +222,8 @@ function Dashboard() {
 
   const handleUpdateApplication = async (e) => {
     e.preventDefault();
+    if (!editingApplication?.id) return;
+
     setLoading(true);
 
     const { data, error } = await supabase
@@ -219,16 +245,7 @@ function Dashboard() {
       
       setShowEditModal(false);
       setEditingApplication(null);
-      setFormData({
-        company_name: '',
-        job_title: '',
-        location: '',
-        date_applied: new Date().toISOString().split('T')[0],
-        status: 'Applied',
-        platform: 'LinkedIn',
-        job_link: '',
-        notes: ''
-      });
+      setFormData(emptyForm());
     }
 
     setLoading(false);
@@ -249,6 +266,7 @@ function Dashboard() {
       alert('Error deleting application. Please try again.');
     } else {
       setApplications(applications.filter(app => app.id !== id));
+      setSelectedIds((prev) => prev.filter((x) => x !== id));
       setSuccessMessage('✅ Application deleted successfully!');
       setTimeout(() => setSuccessMessage(''), 3000);
     }
@@ -276,6 +294,68 @@ function Dashboard() {
     
     return true;
   });
+
+  const filteredIds = filteredApplications.map((a) => a.id);
+  const allFilteredSelected =
+    filteredIds.length > 0 && filteredIds.every((id) => selectedIds.includes(id));
+  const someFilteredSelected = filteredIds.some((id) => selectedIds.includes(id));
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someFilteredSelected && !allFilteredSelected;
+    }
+  }, [someFilteredSelected, allFilteredSelected]);
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [searchQuery, statusFilter]);
+
+  const toggleSelectRow = (id) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllFiltered = () => {
+    if (allFilteredSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !filteredIds.includes(id)));
+    } else {
+      setSelectedIds((prev) => [...new Set([...prev, ...filteredIds])]);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0 || !user?.id) return;
+    const n = selectedIds.length;
+    if (
+      !window.confirm(
+        `Delete ${n} application${n === 1 ? '' : 's'}? This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+
+    setLoading(true);
+    const idsToDelete = [...selectedIds];
+    const { error } = await supabase
+      .from('applications')
+      .delete()
+      .eq('user_id', user.id)
+      .in('id', idsToDelete);
+
+    if (error) {
+      console.error('Error deleting applications:', error);
+      alert('Error deleting applications. Please try again.');
+    } else {
+      setApplications((apps) => apps.filter((app) => !idsToDelete.includes(app.id)));
+      setSelectedIds([]);
+      setSuccessMessage(
+        n === 1 ? '✅ Application deleted.' : `✅ ${n} applications deleted.`
+      );
+      setTimeout(() => setSuccessMessage(''), 3000);
+    }
+    setLoading(false);
+  };
 
   if (loading && !user) {
     return (
@@ -318,6 +398,174 @@ function Dashboard() {
         </div>
       )}
 
+      {(showAddModal || showEditModal) && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="application-modal-title"
+          onClick={closeApplicationModals}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h2
+                id="application-modal-title"
+                className="text-xl font-bold text-gray-900"
+              >
+                {showEditModal ? 'Edit application' : 'Add application'}
+              </h2>
+              <button
+                type="button"
+                onClick={closeApplicationModals}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form
+              onSubmit={showEditModal ? handleUpdateApplication : handleAddApplication}
+              className="space-y-4"
+            >
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Company <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={formData.company_name}
+                  onChange={(e) =>
+                    setFormData({ ...formData, company_name: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Job title <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={formData.job_title}
+                  onChange={(e) =>
+                    setFormData({ ...formData, job_title: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Location
+                </label>
+                <input
+                  type="text"
+                  value={formData.location}
+                  onChange={(e) =>
+                    setFormData({ ...formData, location: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Date applied
+                </label>
+                <input
+                  type="date"
+                  value={formData.date_applied}
+                  onChange={(e) =>
+                    setFormData({ ...formData, date_applied: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Status
+                </label>
+                <select
+                  value={formData.status}
+                  onChange={(e) =>
+                    setFormData({ ...formData, status: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                >
+                  <option value="Saved">Saved</option>
+                  <option value="Applied">Applied</option>
+                  <option value="Interview Scheduled">Interview Scheduled</option>
+                  <option value="Interview Completed">Interview Completed</option>
+                  <option value="Offer Received">Offer Received</option>
+                  <option value="Rejected by Company">Rejected by Company</option>
+                  <option value="Ghosted">Ghosted</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Platform
+                </label>
+                <input
+                  type="text"
+                  value={formData.platform}
+                  onChange={(e) =>
+                    setFormData({ ...formData, platform: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Job link
+                </label>
+                <input
+                  type="url"
+                  value={formData.job_link}
+                  onChange={(e) =>
+                    setFormData({ ...formData, job_link: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Notes
+                </label>
+                <textarea
+                  rows={3}
+                  value={formData.notes}
+                  onChange={(e) =>
+                    setFormData({ ...formData, notes: e.target.value })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeApplicationModals}
+                  className="rounded-lg border border-gray-300 px-4 py-2 font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {showEditModal ? 'Save changes' : 'Add application'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
@@ -352,7 +600,7 @@ function Dashboard() {
 
         <div className="mb-6 flex flex-col md:flex-row gap-4 items-center">
           <button 
-            onClick={() => setShowAddModal(true)}
+            onClick={openAddModal}
             className="px-6 py-3 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 transition whitespace-nowrap"
           >
             + Add New Application
@@ -395,6 +643,33 @@ function Dashboard() {
           )}
         </div>
 
+        {selectedIds.length > 0 && (
+          <div
+            className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="font-medium text-emerald-900">
+              {selectedIds.length} selected
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="rounded-lg px-3 py-1.5 font-medium text-emerald-800 hover:bg-emerald-100"
+            >
+              Clear selection
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={loading}
+              className="rounded-lg bg-red-600 px-4 py-2 font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              Delete selected
+            </button>
+          </div>
+        )}
+
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           {filteredApplications.length === 0 ? (
             <div className="text-center py-12">
@@ -409,7 +684,7 @@ function Dashboard() {
               </p>
               {!searchQuery && statusFilter === 'All' && (
                 <button
-                  onClick={() => setShowAddModal(true)}
+                  onClick={openAddModal}
                   className="px-6 py-3 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-700 transition"
                 >
                   + Add First Application
@@ -421,6 +696,18 @@ function Dashboard() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th className="w-12 px-3 py-3 text-left align-middle" scope="col">
+                      <span className="sr-only">Select row</span>
+                      <input
+                        ref={selectAllRef}
+                        type="checkbox"
+                        checked={allFilteredSelected}
+                        onChange={toggleSelectAllFiltered}
+                        disabled={filteredApplications.length === 0}
+                        className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        aria-label="Select all visible rows"
+                      />
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Position</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date Applied</th>
@@ -431,6 +718,16 @@ function Dashboard() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredApplications.map((app) => (
                     <tr key={app.id} className="hover:bg-gray-50">
+                      <td className="w-12 px-3 py-4 align-middle">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(app.id)}
+                          onChange={() => toggleSelectRow(app.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                          aria-label={`Select ${app.company_name} — ${app.job_title}`}
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{app.company_name}</div>
                         {app.location && <div className="text-sm text-gray-500">{app.location}</div>}
@@ -455,13 +752,15 @@ function Dashboard() {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button 
+                        <button
+                          type="button"
                           onClick={() => handleEditClick(app)}
                           className="text-emerald-600 hover:text-emerald-800 mr-3 font-medium"
                         >
                           Edit
                         </button>
-                        <button 
+                        <button
+                          type="button"
                           onClick={() => handleDeleteApplication(app.id)}
                           className="text-red-600 hover:text-red-800 font-medium"
                         >
