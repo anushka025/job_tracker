@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 
 const ACCEPTED = '.pdf,.doc,.docx,.txt';
+const API_BASE = process.env.REACT_APP_API_URL || '';
 
 function ResumeUpload({ userId, onClose, onResumeSaved }) {
   const [resumeText, setResumeText] = useState('');
@@ -38,7 +39,7 @@ function ResumeUpload({ userId, onClose, onResumeSaved }) {
     formData.append('resume', file);
 
     try {
-      const res = await fetch('/api/extract-resume', { method: 'POST', body: formData });
+      const res = await fetch(`${API_BASE}/api/extract-resume`, { method: 'POST', body: formData });
       const data = await res.json();
 
       if (!res.ok) throw new Error(data.error || 'Extraction failed.');

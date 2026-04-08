@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 
+const API_BASE = process.env.REACT_APP_API_URL || '';
+
 function MatchRing({ percentage }) {
   const color =
     percentage >= 80 ? 'text-emerald-600' :
@@ -113,7 +115,7 @@ function JobMatchModal({ app, userId, onClose, onOpenResume }) {
         return;
       }
 
-      const response = await fetch('/api/analyze-match', {
+      const response = await fetch(`${API_BASE}/api/analyze-match`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
