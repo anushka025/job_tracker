@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import JobMatchModal from './JobMatchModal';
+import ResumeUpload from './ResumeUpload';
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -16,6 +18,11 @@ function Dashboard() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [selectedIds, setSelectedIds] = useState([]);
   const selectAllRef = useRef(null);
+
+  // AI feature state
+  const [showMatchModal, setShowMatchModal] = useState(false);
+  const [matchingApp, setMatchingApp] = useState(null);
+  const [showResumeModal, setShowResumeModal] = useState(false);
   const [formData, setFormData] = useState({
     company_name: '',
     job_title: '',
@@ -375,6 +382,12 @@ function Dashboard() {
               <p className="text-emerald-100 mt-1">{user?.email}</p>
             </div>
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => setShowResumeModal(true)}
+                className="text-white hover:text-emerald-100 font-medium"
+              >
+                My Resume
+              </button>
               <button
                 onClick={() => navigate('/settings')}
                 className="text-white hover:text-emerald-100 font-medium"
@@ -754,6 +767,13 @@ function Dashboard() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <button
                           type="button"
+                          onClick={() => { setMatchingApp(app); setShowMatchModal(true); }}
+                          className="text-purple-600 hover:text-purple-800 mr-3 font-medium"
+                        >
+                          Analyze
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleEditClick(app)}
                           className="text-emerald-600 hover:text-emerald-800 mr-3 font-medium"
                         >
@@ -775,6 +795,23 @@ function Dashboard() {
           )}
         </div>
       </main>
+
+      {showMatchModal && matchingApp && (
+        <JobMatchModal
+          app={matchingApp}
+          userId={user?.id}
+          onClose={() => { setShowMatchModal(false); setMatchingApp(null); }}
+          onOpenResume={() => { setShowMatchModal(false); setShowResumeModal(true); }}
+        />
+      )}
+
+      {showResumeModal && (
+        <ResumeUpload
+          userId={user?.id}
+          onClose={() => setShowResumeModal(false)}
+          onResumeSaved={() => {}}
+        />
+      )}
     </div>
   );
 }
